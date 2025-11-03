@@ -20,7 +20,7 @@ parse_fasta <- function(filepath) {
     }
     
     # Vérifier si la ligne est un header (commence par >)
-    if (substr(line, 1, 1) == ">") {
+    if (startsWith(line, ">")) {
       # Si on avait déjà une séquence en cours, la sauvegarder
       if (!is.null(current_header)) {
         sequences[[current_header]] <- current_sequence

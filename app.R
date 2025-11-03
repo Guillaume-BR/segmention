@@ -52,14 +52,45 @@ server <- function(input, output, session) {
   observeEvent(input$fasta_file, {
     req(input$fasta_file)
     
+    # Valider l'extension du fichier
+    file_ext <- tools::file_ext(input$fasta_file$name)
+    valid_extensions <- c("fasta", "fa", "txt", "FASTA", "FA", "TXT")
+    
+    if (!file_ext %in% valid_extensions) {
+      showNotification(
+        paste("Extension de fichier non valide:", file_ext, 
+              ". Extensions acceptées: .fasta, .fa, .txt"),
+        type = "error",
+        duration = 5
+      )
+      return()
+    }
+    
     # Parser le fichier FASTA
     tryCatch({
       sequences <- parse_fasta(input$fasta_file$datapath)
+      
+      # Vérifier que le fichier contient au moins une séquence
+      if (length(sequences) == 0) {
+        showNotification(
+          "Le fichier ne contient aucune séquence FASTA valide.",
+          type = "warning",
+          duration = 5
+        )
+        return()
+      }
+      
       sequences_list(sequences)
+      showNotification(
+        paste("Chargement réussi:", length(sequences), "séquence(s) trouvée(s)"),
+        type = "message",
+        duration = 3
+      )
     }, error = function(e) {
       showNotification(
         paste("Erreur lors de la lecture du fichier:", e$message),
-        type = "error"
+        type = "error",
+        duration = 5
       )
     })
   })
