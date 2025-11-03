@@ -28,6 +28,14 @@ ui <- fluidPage(
         h4("Informations sur les séquences chargées:"),
         verbatimTextOutput("sequence_info"),
         hr(),
+        h4("Sélection de la séquence à analyser:"),
+        # dynamic UI: select the sequence to analyze
+        uiOutput("sequence_selector"),
+        actionButton("analyze_btn", "Analyser la séquence sélectionnée"),
+        hr(),
+        h4("Analyse de la séquence sélectionnée:"),
+        verbatimTextOutput("selected_analysis"),
+        hr(),
         h4("Structure de la liste R:"),
         verbatimTextOutput("list_structure"),
         hr(),
@@ -47,6 +55,8 @@ server <- function(input, output, session) {
   
   # Variable réactive pour stocker la liste des séquences
   sequences_list <- reactiveVal(NULL)
+  # Stocke le nom (clé) de la séquence actuellement sélectionnée/analysee
+  selected_sequence_name <- reactiveVal(NULL)
   
   # Observer le chargement du fichier
   observeEvent(input$fasta_file, {
@@ -80,7 +90,16 @@ server <- function(input, output, session) {
         return()
       }
       
+      # S'assurer que chaque séquence a un nom (utile si parse_fasta ne les fournit pas)
+      nms <- names(sequences)
+      if (is.null(nms)) nms <- rep("", length(sequences))
+      nms <- ifelse(is.na(nms) | nms == "", paste0("sequence_", seq_along(sequences)), nms)
+      names(sequences) <- nms
+      
       sequences_list(sequences)
+      # réinitialiser la sélection précédente
+      selected_sequence_name(NULL)
+      
       showNotification(
         paste("Chargement réussi:", length(sequences), "séquence(s) trouvée(s)"),
         type = "message",
@@ -100,6 +119,26 @@ server <- function(input, output, session) {
     !is.null(sequences_list())
   })
   outputOptions(output, "fileUploaded", suspendWhenHidden = FALSE)
+  
+  # UI dynamique: menu de sélection des séquences une fois le fichier chargé
+  output$sequence_selector <- renderUI({
+    req(sequences_list())
+    seqs <- sequences_list()
+    choices <- names(seqs)
+    selectInput("sequence_choice", "Choisir la séquence :", choices = choices, selected = choices[1])
+  })
+  
+  # Quand l'utilisateur clique sur le bouton "Analyser", on fixe la séquence sélectionnée
+  observeEvent(input$analyze_btn, {
+    req(sequences_list())
+    chosen <- input$sequence_choice
+    if (is.null(chosen) || chosen == "") {
+      showNotification("Veuillez choisir une séquence avant d'analyser.", type = "warning")
+      return()
+    }
+    selected_sequence_name(chosen)
+    showNotification(paste("Séquence sélectionnée pour analyse :", chosen), type = "message", duration = 2)
+  })
   
   # Afficher les informations sur les séquences
   output$sequence_info <- renderPrint({
@@ -140,6 +179,38 @@ server <- function(input, output, session) {
         cat(sequence, "\n\n")
       }
     }
+  })
+  
+  # Afficher les détails de la séquence sélectionnée (après clic sur le bouton)
+  output$selected_analysis <- renderPrint({
+    req(selected_sequence_name(), sequences_list())
+    seqs <- sequences_list()
+    sel_name <- selected_sequence_name()
+    seq <- seqs[[sel_name]]
+    if (is.null(seq)) {
+      cat("Séquence non trouvée.\n")
+      return()
+    }
+    
+    cat("Nom de la séquence sélectionnée:", sel_name, "\n")
+    cat("Longueur :", nchar(seq), "nucléotides\n\n")
+    
+    # Affichage d'un aperçu plus long (jusqu'à 1000 caractères)
+    max_chars <- 1000
+    if (nchar(seq) > max_chars) {
+      cat("Aperçu (premiers", max_chars, "caractères):\n")
+      cat(substr(seq, 1, max_chars), "...\n")
+    } else {
+      cat("Séquence complète :\n")
+      cat(seq, "\n")
+    }
+    
+    # Ici, vous pouvez ajouter des analyses supplémentaires (composition, GC%, segmentation, ...)
+    # Exemple simple: composition des nucléotides
+    chars <- strsplit(toupper(seq), "")[[1]]
+    nucs <- table(chars)
+    cat("\nComposition des nucléotides:\n")
+    print(nucs)
   })
 }
 
