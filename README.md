@@ -54,6 +54,7 @@ Un fichier exemple (`example.fasta`) est fourni dans le dépôt pour tester l'ap
 ## Structure du projet
 
 - `app.R` : Application Shiny principale
+- `utils.R` : Fonctions utilitaires pour le parsing FASTA
 - `example.fasta` : Fichier FASTA d'exemple pour les tests
 - `test_parse.R` : Script de test pour la fonction de parsing FASTA
 
