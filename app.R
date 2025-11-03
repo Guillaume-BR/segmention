@@ -15,7 +15,7 @@ ui <- fluidPage(
       h3("Charger une séquence FASTA"),
       fileInput("fasta_file", 
                 "Choisir un fichier FASTA",
-                accept = c(".fasta", ".fa", ".txt")),
+                accept = c(".fasta", ".fa", ".txt",".fna")),
       hr(),
       helpText("Chargez un fichier au format FASTA pour analyser la séquence ADN."),
       helpText("Le fichier sera transformé en liste R pour l'analyse.")
@@ -54,7 +54,7 @@ server <- function(input, output, session) {
     
     # Valider l'extension du fichier
     file_ext <- tools::file_ext(input$fasta_file$name)
-    valid_extensions <- c("fasta", "fa", "txt", "FASTA", "FA", "TXT")
+    valid_extensions <- c("fasta", "fa", "txt", "FASTA", "FA", "TXT", "fna")
     
     if (!file_ext %in% valid_extensions) {
       showNotification(
