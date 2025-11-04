@@ -134,34 +134,63 @@ server <- function(input, output, session) {
   })
   
   # Afficher les détails de la séquence sélectionnée (après clic sur le bouton)
-  output$selected_analysis <- renderPrint({
-    req(selected_sequence_name(), sequences_list())
-    seqs <- sequences_list()
-    sel_name <- selected_sequence_name()
-    seq <- seqs[[sel_name]]
-    if (is.null(seq)) {
-      cat("Séquence non trouvée.\n")
+  observeEvent(input$analyze_btn, {
+    
+    # -------------------------------
+    # 1️⃣ Récupérer la séquence sélectionnée
+    # -------------------------------
+    req(input$selected_sequence)
+    seq_selected <- sequences()[[input$selected_sequence]]
+    if (is.null(seq_selected)) {
+      output$selected_analysis <- renderPrint({ cat("Séquence non trouvée.\n") })
       return()
     }
     
-    cat("Nom de la séquence sélectionnée:", sel_name, "\n")
-    cat("Longueur :", nchar(seq), "nucléotides\n\n")
+    # -------------------------------
+    # 2️⃣ Analyse texte
+    # -------------------------------
+    output$selected_analysis <- renderPrint({
+      cat("Nom de la séquence sélectionnée:", input$selected_sequence, "\n")
+      cat("Longueur :", nchar(seq_selected), "nucléotides\n\n")
+      
+      # Aperçu jusqu'à 1000 caractères
+      max_chars <- 1000
+      if (nchar(seq_selected) > max_chars) {
+        cat("Aperçu (premiers", max_chars, "caractères):\n")
+        cat(substr(seq_selected, 1, max_chars), "...\n")
+      } else {
+        cat("Séquence complète :\n")
+        cat(seq_selected, "\n")
+      }
+      
+      # Composition des nucléotides
+      chars <- strsplit(toupper(seq_selected), "")[[1]]
+      nucs <- table(chars)
+      cat("\nComposition des nucléotides:\n")
+      print(nucs)
+    })
     
-    # Affichage d'un aperçu plus long (jusqu'à 1000 caractères)
-    max_chars <- 1000
-    if (nchar(seq) > max_chars) {
-      cat("Aperçu (premiers", max_chars, "caractères):\n")
-      cat(substr(seq, 1, max_chars), "...\n")
-    } else {
-      cat("Séquence complète :\n")
-      cat(seq, "\n")
-    }
+    # -------------------------------
+    # 3️⃣ Calcul HMM / Baum-Welch
+    # -------------------------------
+    pi <- matrix(c(0.65,0.55,0.35,0.45), nrow=2, ncol=2)
+    f0 <- matrix(c(0.4,0.1,0.1,0.4), nrow=4)
+    f1 <- matrix(c(0.25,0.25,0.25,0.25), nrow=4)
+    epsilon <- 0.001
     
-    # Ici, vous pouvez ajouter des analyses supplémentaires (composition, GC%, segmentation, ...)
-    # Exemple simple: composition des nucléotides
-    chars <- strsplit(toupper(seq), "")[[1]]
-    nucs <- table(chars)
-    cat("\nComposition des nucléotides:\n")
-    print(nucs)
+    BW <- Baum_Welch(seq_selected, pi, f0, f1, epsilon)
+    best_model <- ForBack(seq_selected, BW$pi, BW$f1, BW$f2)
+    
+    # -------------------------------
+    # 4️⃣ Graphique HMM
+    # -------------------------------
+    output$sequence_plot <- renderPlot({
+      plot(best_model$P[,1], type="l", col="red", ylab="Probabilité", xlab="Position")
+      lines(best_model$F[,1], col="blue")
+      lines(best_model$L[,1], col="orange", lwd=2)
+      legend("bottomright", legend=c("Prediction","Filtrage","Lissage"),
+             col=c("red","blue","orange"), inset=c(0,1), xpd=TRUE, horiz=TRUE, bty="n",
+             lty=1)
+    })
   })
 }
