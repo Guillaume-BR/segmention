@@ -5,192 +5,329 @@ source("utils.R")
 
 server <- function(input, output, session) {
   
-  # Variable réactive pour stocker la liste des séquences
+  # =========================================================================
+  # VARIABLES RÉACTIVES
+  # =========================================================================
   sequences_list <- reactiveVal(NULL)
-  # Stocke le nom (clé) de la séquence actuellement sélectionnée/analysee
   selected_sequence_name <- reactiveVal(NULL)
+  hmm_results <- reactiveVal(NULL)
+  analysis_data <- reactiveVal(NULL)
   
-  # Observer le chargement du fichier
+  # =========================================================================
+  # 1️⃣ CHARGEMENT DU FICHIER FASTA
+  # =========================================================================
   observeEvent(input$fasta_file, {
     req(input$fasta_file)
     
-    # Valider l'extension du fichier
-    file_ext <- tools::file_ext(input$fasta_file$name)
-    valid_extensions <- c("fasta", "fa", "txt", "FASTA", "FA", "TXT", "fna")
+    file_ext <- tolower(tools::file_ext(input$fasta_file$name))
+    valid_extensions <- c("fasta", "fa", "txt", "fna")
     
     if (!file_ext %in% valid_extensions) {
       showNotification(
-        paste("Extension de fichier non valide:", file_ext, 
-              ". Extensions acceptées: .fasta, .fa, .txt"),
+        paste("❌ Extension invalide:", file_ext),
         type = "error",
         duration = 5
       )
       return()
     }
     
-    # Parser le fichier FASTA
     tryCatch({
       sequences <- parse_fasta(input$fasta_file$datapath)
       
-      # Vérifier que le fichier contient au moins une séquence
       if (length(sequences) == 0) {
         showNotification(
-          "Le fichier ne contient aucune séquence FASTA valide.",
+          "⚠️ Aucune séquence FASTA trouvée.",
           type = "warning",
           duration = 5
         )
         return()
       }
       
-      # S'assurer que chaque séquence a un nom (utile si parse_fasta ne les fournit pas)
       nms <- names(sequences)
-      if (is.null(nms)) nms <- rep("", length(sequences))
-      nms <- ifelse(is.na(nms) | nms == "", paste0("sequence_", seq_along(sequences)), nms)
+      if (is.null(nms) || all(nms == "")) {
+        nms <- paste0("sequence_", seq_along(sequences))
+      } else {
+        nms <- ifelse(is.na(nms) | nms == "", 
+                      paste0("sequence_", seq_along(sequences)), 
+                      nms)
+      }
       names(sequences) <- nms
       
       sequences_list(sequences)
-      # réinitialiser la sélection précédente
       selected_sequence_name(NULL)
+      hmm_results(NULL)
+      analysis_data(NULL)
       
       showNotification(
-        paste("Chargement réussi:", length(sequences), "séquence(s) trouvée(s)"),
+        paste("✅ Chargé:", length(sequences), "séquence(s)"),
         type = "message",
         duration = 3
       )
     }, error = function(e) {
       showNotification(
-        paste("Erreur lors de la lecture du fichier:", e$message),
+        paste("❌ Erreur:", e$message),
         type = "error",
         duration = 5
       )
     })
   })
   
-  # Vérifier si un fichier est chargé
+  # =========================================================================
+  # 2️⃣ INDICATEUR DE FICHIER CHARGÉ
+  # =========================================================================
   output$fileUploaded <- reactive({
     !is.null(sequences_list())
   })
   outputOptions(output, "fileUploaded", suspendWhenHidden = FALSE)
   
-  # UI dynamique: menu de sélection des séquences une fois le fichier chargé
+  # =========================================================================
+  # 3️⃣ SÉLECTEUR DYNAMIQUE
+  # =========================================================================
   output$sequence_selector <- renderUI({
     req(sequences_list())
     seqs <- sequences_list()
     choices <- names(seqs)
-    selectInput("sequence_choice", "Choisir la séquence :", choices = choices, selected = choices[1])
+    
+    selectInput(
+      "sequence_choice", 
+      "Choisir la séquence:", 
+      choices = choices, 
+      selected = choices[1]
+    )
   })
   
-  # Quand l'utilisateur clique sur le bouton "Analyser", on fixe la séquence sélectionnée
+  # =========================================================================
+  # 4️⃣ BOUTON "ANALYSER"
+  # =========================================================================
   observeEvent(input$analyze_btn, {
     req(sequences_list())
-    chosen <- input$sequence_choice
-    if (is.null(chosen) || chosen == "") {
-      showNotification("Veuillez choisir une séquence avant d'analyser.", type = "warning")
+    req(input$sequence_choice)
+    
+    seq_name <- input$sequence_choice
+    seq_selected <- sequences_list()[[seq_name]]
+    
+    if (is.null(seq_selected) || seq_selected == "") {
+      showNotification("❌ Séquence non trouvée.", type = "error")
       return()
     }
-    selected_sequence_name(chosen)
-    showNotification(paste("Séquence sélectionnée pour analyse :", chosen), type = "message", duration = 2)
+    
+    selected_sequence_name(seq_name)
+    
+    showNotification(
+      paste("🔍 Analyse en cours..."),
+      type = "message",
+      duration = 1
+    )
+    
+    # =====================================================================
+    # AFFICHAGE TEXTE
+    # =====================================================================
+    output$selected_analysis <- renderPrint({
+      cat("╔════════════════════════════════════════════════════════════╗\n")
+      cat("║          ANALYSE DE LA SÉQUENCE SÉLECTIONNÉE              ║\n")
+      cat("╚════════════════════════════════════════════════════════════╝\n\n")
+      
+      cat("📌 Nom:", seq_name, "\n")
+      cat("📏 Longueur:", nchar(seq_selected), "nucléotides\n\n")
+      
+      max_chars <- 1000
+      cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+      cat("SÉQUENCE:\n")
+      cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+      
+      if (nchar(seq_selected) > max_chars) {
+        cat(substr(seq_selected, 1, max_chars), "\n")
+        cat("... [+", nchar(seq_selected) - max_chars, "caractères]\n\n")
+      } else {
+        cat(seq_selected, "\n\n")
+      }
+      
+      chars <- strsplit(toupper(seq_selected), "")[[1]]
+      nucs <- table(chars)
+      
+      cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+      cat("COMPOSITION:\n")
+      cat("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+      
+      for (nuc in c("A", "C", "G", "T")) {
+        count <- if (nuc %in% names(nucs)) nucs[nuc] else 0
+        pct <- (count / length(chars)) * 100
+        cat(sprintf("%s: %4d (%.2f%%)\n", nuc, count, pct))
+      }
+      cat("\n")
+    })
+    
+    # =====================================================================
+    # CALCUL HMM
+    # =====================================================================
+    tryCatch({
+      print("DEBUG: Début calcul HMM")
+      
+      pi <- matrix(c(0.65, 0.55, 0.35, 0.45), nrow = 2, ncol = 2)
+      f0 <- matrix(c(0.4, 0.1, 0.1, 0.4), nrow = 4)
+      f1 <- matrix(c(0.25, 0.25, 0.25, 0.25), nrow = 4)
+      epsilon <- 0.001
+      
+      BW <- Baum_Welch(seq_selected, pi, f0, f1, epsilon)
+      print(paste("DEBUG: Baum-Welch done, iterations:", BW$Numit))
+      
+      best_model <- ForBack(seq_selected, BW$pi, BW$f1, BW$f2)
+      print(paste("DEBUG: ForBack done, dim P:", nrow(best_model$P), "x", ncol(best_model$P)))
+      
+      # Stocker dans une liste réactive
+      analysis_data(list(
+        model = best_model,
+        seq_name = seq_name,
+        iterations = BW$Numit
+      ))
+      
+      print("DEBUG: analysis_data mise à jour")
+      
+      showNotification(
+        paste("✅ Analyse réussie! (", BW$Numit, "itérations )"),
+        type = "message",
+        duration = 3
+      )
+      
+    }, error = function(e) {
+      print(paste("DEBUG: Erreur HMM -", e$message))
+      showNotification(
+        paste("❌ Erreur:", e$message),
+        type = "error",
+        duration = 5
+      )
+    })
   })
   
-  # Afficher les informations sur les séquences
+  # =====================================================================
+  # ✅ GRAPHIQUE HMM - AVEC observe() POUR FORCER LE RENDU
+  # =====================================================================
+  observe({
+    # Cette dépendance réactive force le rendu quand analysis_data() change
+    data <- analysis_data()
+    
+    print(paste("DEBUG: observe() appelé, data is.null =", is.null(data)))
+    
+    output$sequence_plot <- renderPlot({
+      print("DEBUG: renderPlot appelé DEPUIS observe()")
+      
+      # Récupérer les données
+      data <- analysis_data()
+      
+      if (is.null(data)) {
+        print("DEBUG: data is NULL")
+        plot(1, 1, type = "n", axes = FALSE)
+        text(1, 1, "Veuillez analyser une séquence d'abord", col = "gray")
+        return()
+      }
+      
+      model <- data$model
+      seq_name <- data$seq_name
+      
+      print(paste("DEBUG: model non-null, dimensions:", nrow(model$P), "x", ncol(model$P)))
+      
+      if (is.null(model) || is.null(model$P)) {
+        print("DEBUG: model$P is NULL")
+        plot(1, 1, type = "n", axes = FALSE)
+        text(1, 1, "Erreur: modèle invalide", col = "red")
+        return()
+      }
+      
+      n <- nrow(model$P)
+      if (n == 0) {
+        print("DEBUG: n = 0")
+        plot(1, 1, type = "n", axes = FALSE)
+        text(1, 1, "Erreur: séquence trop courte", col = "red")
+        return()
+      }
+      
+      print(paste("DEBUG: n =", n, ", création du graphique"))
+      
+      positions <- 1:n
+      pred <- as.numeric(model$P[, 1])
+      filt <- as.numeric(model$Fil[, 1])
+      liss <- as.numeric(model$L[, 1])
+      
+      print(paste("DEBUG: pred length =", length(pred)))
+      print(paste("DEBUG: pred first 5:", paste(head(pred, 5), collapse=", ")))
+      
+      y_max <- max(c(pred, filt, liss), na.rm = TRUE)
+      if (is.na(y_max) || is.infinite(y_max) || y_max == 0) {
+        y_max <- 1
+      }
+      
+      print(paste("DEBUG: y_max =", y_max))
+      print("DEBUG: plot() appelé")
+      
+      # ✅ CRÉER LE GRAPHIQUE
+      plot(positions, pred, 
+           type = "l", 
+           col = "red", 
+           lwd = 2.5,
+           ylab = "Probabilité", 
+           xlab = "Position",
+           main = paste("Modèle de Markov Caché (HMM) -", seq_name),
+           ylim = c(0, y_max * 1.2))
+      
+      lines(positions, filt, col = "blue", lwd = 2.5)
+      lines(positions, liss, col = "orange", lwd = 2.5)
+      
+      grid(col = "gray80", lty = "dotted")
+      
+      legend("topright", 
+             legend = c("Prédiction", "Filtrage", "Lissage"),
+             col = c("red", "blue", "orange"), 
+             lty = 1,
+             lwd = 2.5,
+             bty = "n")
+      
+      print("DEBUG: graphique terminé ✅")
+    })
+  })
+  
+  # =========================================================================
+  # AUTRES AFFICHAGES
+  # =========================================================================
   output$sequence_info <- renderPrint({
     req(sequences_list())
     sequences <- sequences_list()
     
-    cat("Nombre de séquences:", length(sequences), "\n\n")
+    cat("SÉQUENCES CHARGÉES\n")
+    cat("═════════════════════════════════════════\n\n")
+    cat("Nombre:", length(sequences), "\n\n")
     
     for (i in seq_along(sequences)) {
       name <- names(sequences)[i]
       seq_length <- nchar(sequences[[i]])
-      cat(sprintf("Séquence %d: %s\n", i, name))
-      cat(sprintf("  Longueur: %d nucléotides\n\n", seq_length))
+      cat(sprintf("%d. %s (%d nt)\n", i, name, seq_length))
     }
   })
   
-  # Afficher la structure de la liste R
   output$list_structure <- renderPrint({
     req(sequences_list())
-    str(sequences_list())
+    str(sequences_list(), max.level = 2)
   })
   
-  # Afficher un aperçu des séquences
   output$sequence_preview <- renderPrint({
     req(sequences_list())
     sequences <- sequences_list()
+    
+    cat("APERÇU DES SÉQUENCES\n")
+    cat("═════════════════════════════════════════\n\n")
     
     for (i in seq_along(sequences)) {
       name <- names(sequences)[i]
       sequence <- sequences[[i]]
       
-      cat(sprintf("=== %s ===\n", name))
+      cat(sprintf("%d. %s\n", i, name))
+      cat(sprintf("   Longueur: %d nt\n", nchar(sequence)))
+      cat("   Aperçu: ")
       
-      # Afficher les 100 premiers caractères
       if (nchar(sequence) > 100) {
         cat(substr(sequence, 1, 100), "...\n\n")
       } else {
         cat(sequence, "\n\n")
       }
     }
-  })
-  
-  # Afficher les détails de la séquence sélectionnée (après clic sur le bouton)
-  observeEvent(input$analyze_btn, {
-    
-    # -------------------------------
-    # 1️⃣ Récupérer la séquence sélectionnée
-    # -------------------------------
-    req(input$selected_sequence)
-    seq_selected <- sequences()[[input$selected_sequence]]
-    if (is.null(seq_selected)) {
-      output$selected_analysis <- renderPrint({ cat("Séquence non trouvée.\n") })
-      return()
-    }
-    
-    # -------------------------------
-    # 2️⃣ Analyse texte
-    # -------------------------------
-    output$selected_analysis <- renderPrint({
-      cat("Nom de la séquence sélectionnée:", input$selected_sequence, "\n")
-      cat("Longueur :", nchar(seq_selected), "nucléotides\n\n")
-      
-      # Aperçu jusqu'à 1000 caractères
-      max_chars <- 1000
-      if (nchar(seq_selected) > max_chars) {
-        cat("Aperçu (premiers", max_chars, "caractères):\n")
-        cat(substr(seq_selected, 1, max_chars), "...\n")
-      } else {
-        cat("Séquence complète :\n")
-        cat(seq_selected, "\n")
-      }
-      
-      # Composition des nucléotides
-      chars <- strsplit(toupper(seq_selected), "")[[1]]
-      nucs <- table(chars)
-      cat("\nComposition des nucléotides:\n")
-      print(nucs)
-    })
-    
-    # -------------------------------
-    # 3️⃣ Calcul HMM / Baum-Welch
-    # -------------------------------
-    pi <- matrix(c(0.65,0.55,0.35,0.45), nrow=2, ncol=2)
-    f0 <- matrix(c(0.4,0.1,0.1,0.4), nrow=4)
-    f1 <- matrix(c(0.25,0.25,0.25,0.25), nrow=4)
-    epsilon <- 0.001
-    
-    BW <- Baum_Welch(seq_selected, pi, f0, f1, epsilon)
-    best_model <- ForBack(seq_selected, BW$pi, BW$f1, BW$f2)
-    
-    # -------------------------------
-    # 4️⃣ Graphique HMM
-    # -------------------------------
-    output$sequence_plot <- renderPlot({
-      plot(best_model$P[,1], type="l", col="red", ylab="Probabilité", xlab="Position")
-      lines(best_model$F[,1], col="blue")
-      lines(best_model$L[,1], col="orange", lwd=2)
-      legend("bottomright", legend=c("Prediction","Filtrage","Lissage"),
-             col=c("red","blue","orange"), inset=c(0,1), xpd=TRUE, horiz=TRUE, bty="n",
-             lty=1)
-    })
   })
 }
